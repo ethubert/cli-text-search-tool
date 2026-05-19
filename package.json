@@ -1,0 +1,35 @@
+{
+  "name": "cli-text-search-tool",
+  "version": "1.0.0",
+  "description": "A cli tool to search text in files",
+  "keywords": [
+    "cli",
+    "search"
+  ],
+  "homepage": "https://github.com/ethubert/cli-text-search-tool#readme",
+  "bugs": {
+    "url": "https://github.com/ethubert/cli-text-search-tool/issues"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/ethubert/cli-text-search-tool.git"
+  },
+  "license": "MIT",
+  "author": "Hubert Hilczer",
+  "type": "module",
+  "main": "src/cli.js",
+  "bin": {
+    "search-cli": "src/cli.js"
+  },
+  "scripts": {
+    "start": "node src/cli.js",
+    "test": "node --test \"tests/**/*.test.js\""
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  },
+  "dependencies": {
+    "inquirer": "^9.2.12",
+    "minisearch": "^6.3.0"
+  }
+}
