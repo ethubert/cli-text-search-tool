@@ -2,7 +2,9 @@
 import inquirer from 'inquirer';
 import { writeFile } from 'node:fs/promises';
 import { performance } from 'node:perf_hooks';
-import { DEFAULT_FILES_DIR, listAvailableFiles, search } from './searchEngine.js';
+import { DEFAULT_FILES_DIR, listAvailableFiles } from './searchEngine.js';
+import { search as naiveSearch } from './searchEngine.js';
+import { search as miniSearch } from './miniSearchEngine.js';
 
 const MAX_PREVIEW = 10;
 const HIGHLIGHT_ON = '\x1b[1;33m';
@@ -77,14 +79,31 @@ function printResults(results, elapsedMs, query) {
   console.log('');
 }
 
-async function runQueryLoop(initialFiles) {
+async function promptForEngine() {
+  const { engine } = await inquirer.prompt([
+    {
+      type: 'list',
+      name: 'engine',
+      message: 'Select search engine:',
+      choices: [
+        { name: 'Naive (original implementation)', value: 'naive' },
+        { name: 'MiniSearch (optimized)', value: 'minisearch' },
+      ],
+    },
+  ]);
+  
+  return engine === 'naive' ? naiveSearch : miniSearch;
+}
+
+async function runQueryLoop(initialFiles, searchFn) {
   let selectedFiles = initialFiles;
+  let search = searchFn;
   let lastResults = [];
   let lastQuery = '';
   let lastFiles = [];
   let lastElapsedMs = 0;
 
-  console.log('\nCommands: ":files" to reselect files, ":save [filename]" to save last results, ":quit" to exit. Empty input is ignored.\n');
+  console.log('\nCommands: ":files" to reselect files, ":engine" to switch engine, ":save [filename]" to save last results, ":quit" to exit. Empty input is ignored.\n');
 
   // eslint-disable-next-line no-constant-condition
   while (true) {
@@ -99,6 +118,10 @@ async function runQueryLoop(initialFiles) {
     }
     if (trimmed === ':files') {
       selectedFiles = await promptForFiles();
+      continue;
+    }
+    if (trimmed === ':engine') {
+      search = await promptForEngine();
       continue;
     }
     if (trimmed === ':save' || trimmed.startsWith(':save ')) {
@@ -135,7 +158,8 @@ async function runQueryLoop(initialFiles) {
 
 async function main() {
   const selectedFiles = await promptForFiles();
-  await runQueryLoop(selectedFiles);
+  const searchFn = await promptForEngine();
+  await runQueryLoop(selectedFiles, searchFn);
 }
 
 main().catch((err) => {
