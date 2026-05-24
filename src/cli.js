@@ -7,26 +7,14 @@ const MAX_PREVIEW = 10;
 const HIGHLIGHT_ON = '\x1b[1;33m';
 const HIGHLIGHT_OFF = '\x1b[0m';
 
+function escapeRegExp(str) {
+  return str.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
 function highlight(text, query) {
   if (!query || !process.stdout.isTTY) return text;
-
-  const haystack = text.toLowerCase();
-  const needle = query.toLowerCase();
-  let out = '';
-  let cursor = 0;
-
-  while (cursor < text.length) {
-    const hit = haystack.indexOf(needle, cursor);
-    if (hit === -1) {
-      out += text.slice(cursor);
-      break;
-    }
-    out += text.slice(cursor, hit);
-    out += HIGHLIGHT_ON + text.slice(hit, hit + needle.length) + HIGHLIGHT_OFF;
-    cursor = hit + needle.length;
-  }
-
-  return out;
+  const wordRe = new RegExp('\\b' + escapeRegExp(query) + '\\b', 'gi');
+  return text.replace(wordRe, (match) => HIGHLIGHT_ON + match + HIGHLIGHT_OFF);
 }
 
 async function promptForFiles() {

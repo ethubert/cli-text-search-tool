@@ -55,12 +55,16 @@ export async function loadDataset(filePath) {
   return flattenDataset(parsed, sourceFile);
 }
 
+function escapeRegExp(str) {
+  return str.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
 export async function search(query, selectedFiles, filesDir = DEFAULT_FILES_DIR) {
   if (typeof query !== 'string' || query.trim().length === 0) {
     return [];
   }
 
-  const needle = query.toLowerCase();
+  const wordRe = new RegExp('\\b' + escapeRegExp(query.trim()) + '\\b', 'i');
   const results = [];
 
   for (const fileName of selectedFiles) {
@@ -68,7 +72,7 @@ export async function search(query, selectedFiles, filesDir = DEFAULT_FILES_DIR)
     const records = await loadDataset(filePath);
 
     for (const record of records) {
-      if (record.text.toLowerCase().includes(needle)) {
+      if (wordRe.test(record.text)) {
         results.push(record);
       }
     }
