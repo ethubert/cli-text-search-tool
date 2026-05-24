@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 import inquirer from 'inquirer';
+import { writeFile } from 'node:fs/promises';
 import { performance } from 'node:perf_hooks';
 import { DEFAULT_FILES_DIR, listAvailableFiles, search } from './searchEngine.js';
 
@@ -42,6 +43,24 @@ function formatResult(record, query) {
   return `[${record._source}] ${ref} — ${highlight(record.text, query)}`;
 }
 
+function defaultFilename(query) {
+  const safe = query.replace(/[^a-zA-Z0-9_-]+/g, '_').slice(0, 50) || 'query';
+  return `results_${safe}.txt`;
+}
+
+async function saveResults(filename, results, query, files, elapsedMs) {
+  const header = [
+    `Query: ${query}`,
+    `Files: ${files.join(', ')}`,
+    `Total: ${results.length}`,
+    `Time:  ${elapsedMs.toFixed(2)} ms`,
+    '---',
+    '',
+  ];
+  const body = results.map((record) => formatResult(record, null));
+  await writeFile(filename, header.concat(body).join('\n') + '\n', 'utf-8');
+}
+
 function printResults(results, elapsedMs, query) {
   const preview = results.slice(0, MAX_PREVIEW);
   for (const record of preview) {
@@ -51,12 +70,21 @@ function printResults(results, elapsedMs, query) {
   if (omitted > 0) {
     console.log(`...and ${omitted} more.`);
   }
-  console.log(`\n${results.length} result(s) in ${elapsedMs.toFixed(2)} ms\n`);
+  console.log(`\n${results.length} result(s) in ${elapsedMs.toFixed(2)} ms`);
+  if (results.length > 0) {
+    console.log(`Tip: ":save [filename]" writes all ${results.length} result(s) to a file (default: ${defaultFilename(query)}).`);
+  }
+  console.log('');
 }
 
 async function runQueryLoop(initialFiles) {
   let selectedFiles = initialFiles;
-  console.log('\nCommands: ":files" to reselect files, ":quit" to exit. Empty input is ignored.\n');
+  let lastResults = [];
+  let lastQuery = '';
+  let lastFiles = [];
+  let lastElapsedMs = 0;
+
+  console.log('\nCommands: ":files" to reselect files, ":save [filename]" to save last results, ":quit" to exit. Empty input is ignored.\n');
 
   // eslint-disable-next-line no-constant-condition
   while (true) {
@@ -73,6 +101,21 @@ async function runQueryLoop(initialFiles) {
       selectedFiles = await promptForFiles();
       continue;
     }
+    if (trimmed === ':save' || trimmed.startsWith(':save ')) {
+      if (!lastQuery) {
+        console.log('No previous search to save. Run a search first.\n');
+        continue;
+      }
+      const arg = trimmed === ':save' ? '' : trimmed.slice(':save '.length).trim();
+      const filename = arg || defaultFilename(lastQuery);
+      try {
+        await saveResults(filename, lastResults, lastQuery, lastFiles, lastElapsedMs);
+        console.log(`Wrote ${lastResults.length} result(s) to ${filename}\n`);
+      } catch (err) {
+        console.error(`Failed to write ${filename}: ${err.message}\n`);
+      }
+      continue;
+    }
     if (trimmed.length === 0) {
       continue;
     }
@@ -80,6 +123,11 @@ async function runQueryLoop(initialFiles) {
     const startedAt = performance.now();
     const results = await search(trimmed, selectedFiles);
     const elapsedMs = performance.now() - startedAt;
+
+    lastResults = results;
+    lastQuery = trimmed;
+    lastFiles = selectedFiles;
+    lastElapsedMs = elapsedMs;
 
     printResults(results, elapsedMs, trimmed);
   }
