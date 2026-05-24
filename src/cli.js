@@ -1,32 +1,23 @@
 #!/usr/bin/env node
 import inquirer from 'inquirer';
+import { writeFile } from 'node:fs/promises';
 import { performance } from 'node:perf_hooks';
-import { DEFAULT_FILES_DIR, listAvailableFiles, search } from './searchEngine.js';
+import { DEFAULT_FILES_DIR, listAvailableFiles } from './searchEngine.js';
+import { search as naiveSearch } from './searchEngine.js';
+import { search as miniSearch } from './miniSearchEngine.js';
 
 const MAX_PREVIEW = 10;
 const HIGHLIGHT_ON = '\x1b[1;33m';
 const HIGHLIGHT_OFF = '\x1b[0m';
 
+function escapeRegExp(str) {
+  return str.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
 function highlight(text, query) {
   if (!query || !process.stdout.isTTY) return text;
-
-  const haystack = text.toLowerCase();
-  const needle = query.toLowerCase();
-  let out = '';
-  let cursor = 0;
-
-  while (cursor < text.length) {
-    const hit = haystack.indexOf(needle, cursor);
-    if (hit === -1) {
-      out += text.slice(cursor);
-      break;
-    }
-    out += text.slice(cursor, hit);
-    out += HIGHLIGHT_ON + text.slice(hit, hit + needle.length) + HIGHLIGHT_OFF;
-    cursor = hit + needle.length;
-  }
-
-  return out;
+  const wordRe = new RegExp('\\b' + escapeRegExp(query) + '\\b', 'gi');
+  return text.replace(wordRe, (match) => HIGHLIGHT_ON + match + HIGHLIGHT_OFF);
 }
 
 async function promptForFiles() {
@@ -54,6 +45,24 @@ function formatResult(record, query) {
   return `[${record._source}] ${ref} — ${highlight(record.text, query)}`;
 }
 
+function defaultFilename(query) {
+  const safe = query.replace(/[^a-zA-Z0-9_-]+/g, '_').slice(0, 50) || 'query';
+  return `results_${safe}.txt`;
+}
+
+async function saveResults(filename, results, query, files, elapsedMs) {
+  const header = [
+    `Query: ${query}`,
+    `Files: ${files.join(', ')}`,
+    `Total: ${results.length}`,
+    `Time:  ${elapsedMs.toFixed(2)} ms`,
+    '---',
+    '',
+  ];
+  const body = results.map((record) => formatResult(record, null));
+  await writeFile(filename, header.concat(body).join('\n') + '\n', 'utf-8');
+}
+
 function printResults(results, elapsedMs, query) {
   const preview = results.slice(0, MAX_PREVIEW);
   for (const record of preview) {
@@ -63,12 +72,38 @@ function printResults(results, elapsedMs, query) {
   if (omitted > 0) {
     console.log(`...and ${omitted} more.`);
   }
-  console.log(`\n${results.length} result(s) in ${elapsedMs.toFixed(2)} ms\n`);
+  console.log(`\n${results.length} result(s) in ${elapsedMs.toFixed(2)} ms`);
+  if (results.length > 0) {
+    console.log(`Tip: ":save [filename]" writes all ${results.length} result(s) to a file (default: ${defaultFilename(query)}).`);
+  }
+  console.log('');
 }
 
-async function runQueryLoop(initialFiles) {
+async function promptForEngine() {
+  const { engine } = await inquirer.prompt([
+    {
+      type: 'list',
+      name: 'engine',
+      message: 'Select search engine:',
+      choices: [
+        { name: 'Naive (original implementation)', value: 'naive' },
+        { name: 'MiniSearch (optimized)', value: 'minisearch' },
+      ],
+    },
+  ]);
+  
+  return engine === 'naive' ? naiveSearch : miniSearch;
+}
+
+async function runQueryLoop(initialFiles, searchFn) {
   let selectedFiles = initialFiles;
-  console.log('\nCommands: ":files" to reselect files, ":quit" to exit. Empty input is ignored.\n');
+  let search = searchFn;
+  let lastResults = [];
+  let lastQuery = '';
+  let lastFiles = [];
+  let lastElapsedMs = 0;
+
+  console.log('\nCommands: ":files" to reselect files, ":engine" to switch engine, ":save [filename]" to save last results, ":quit" to exit. Empty input is ignored.\n');
 
   // eslint-disable-next-line no-constant-condition
   while (true) {
@@ -85,6 +120,25 @@ async function runQueryLoop(initialFiles) {
       selectedFiles = await promptForFiles();
       continue;
     }
+    if (trimmed === ':engine') {
+      search = await promptForEngine();
+      continue;
+    }
+    if (trimmed === ':save' || trimmed.startsWith(':save ')) {
+      if (!lastQuery) {
+        console.log('No previous search to save. Run a search first.\n');
+        continue;
+      }
+      const arg = trimmed === ':save' ? '' : trimmed.slice(':save '.length).trim();
+      const filename = arg || defaultFilename(lastQuery);
+      try {
+        await saveResults(filename, lastResults, lastQuery, lastFiles, lastElapsedMs);
+        console.log(`Wrote ${lastResults.length} result(s) to ${filename}\n`);
+      } catch (err) {
+        console.error(`Failed to write ${filename}: ${err.message}\n`);
+      }
+      continue;
+    }
     if (trimmed.length === 0) {
       continue;
     }
@@ -93,13 +147,19 @@ async function runQueryLoop(initialFiles) {
     const results = await search(trimmed, selectedFiles);
     const elapsedMs = performance.now() - startedAt;
 
+    lastResults = results;
+    lastQuery = trimmed;
+    lastFiles = selectedFiles;
+    lastElapsedMs = elapsedMs;
+
     printResults(results, elapsedMs, trimmed);
   }
 }
 
 async function main() {
   const selectedFiles = await promptForFiles();
-  await runQueryLoop(selectedFiles);
+  const searchFn = await promptForEngine();
+  await runQueryLoop(selectedFiles, searchFn);
 }
 
 main().catch((err) => {
